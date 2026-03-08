@@ -1,0 +1,21 @@
+# Dependencies
+node_modules
+
+# Build & cache
+dist
+build
+.nest
+coverage
+*.tsbuildinfo
+
+# Lock & generated
+yarn.lock
+package-lock.json
+
+# Env
+.env
+.env.*
+
+# Misc
+*.md
+.husky
