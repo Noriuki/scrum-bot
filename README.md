@@ -19,8 +19,8 @@
 Backend em **NestJS** que expõe um endpoint consumido pelo Discord. Sua equipe pode:
 
 - **Criar sessões** de estimativa por canal
-- **Adicionar user stories** e abrir votação com botões (points ou Fibonacci)
-- **Revelar votos** com média e relatório
+- **Adicionar user stories** e abrir votação com botões (points, Fibonacci ou T-Shirt)
+- **Revelar votos** com média/distribuição e relatório
 - **Encerrar sessões** com relatório geral
 
 Possível evolução: daily standup, retrospectivas, ferramentas de sprint.
@@ -47,8 +47,9 @@ src/
 ├── main.ts
 ├── app.module.ts
 ├── common/                    # BaseEntity, constants, utils
-├── integrations/discord/      # Interactions endpoint, handler, DiscordService
+├── integrations/discord/     # Interactions endpoint, handler, DiscordService
 └── modules/
+    ├── health/                # health check (GET /api/health)
     ├── user/                  # usuários (discordId, nome)
     ├── session/               # sessões (título, status, voteScale)
     ├── story/                 # user stories por sessão
@@ -168,28 +169,13 @@ Configurar a URL no Discord: **Interactions Endpoint URL** no painel do app. Ver
 ### Fluxo das sessões
 
 1. **Uma sessão ativa por canal** — `/planning-poker start [título] [escala]`
-   Escala opcional: **points** (1–5, padrão) ou **fibonacci**.
+   Escala opcional: **points** (1–5, padrão), **fibonacci** (1, 2, 3, 5, 8, 13, 21) ou **tshirt** (XS, S, M, L, XL).
 
 2. **Várias stories na mesma sessão** — `/planning-poker story título:<texto>`
    Cada story gera uma mensagem com botões de voto.
-   `/planning-poker reveal` revela os votos da **última** story (média + lista).
+   `/planning-poker reveal` revela os votos da **última** story (média ou distribuição por tamanho, no caso de T-Shirt).
 
 3. **Encerrar** — `/planning-poker end`
-   Envia **relatório** (todas as stories + média). Depois não é possível adicionar story nem revelar; use `start` para nova sessão no canal.
-
-### Uso programático
-
-Para enviar mensagens ou obter o bot no código, injete `DiscordService`:
-
-```ts
-constructor(private readonly discord: DiscordService) {}
-
-await this.discord.sendChannelMessage(channelId, { content: "Hello" });
-await this.discord.getBotUser();
-```
+   Envia **relatório** (todas as stories + média ou distribuição). Depois não é possível adicionar story nem revelar; use `start` para nova sessão no canal.
 
 ---
-
-## Licença
-
-UNLICENSED (projeto privado).
