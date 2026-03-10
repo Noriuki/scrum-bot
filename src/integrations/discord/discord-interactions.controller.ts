@@ -1,24 +1,11 @@
 import type { RawBodyRequest } from "@nestjs/common";
-import {
-  BadRequestException,
-  Controller,
-  Headers,
-  Logger,
-  Post,
-  Req,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { BadRequestException, Controller, Headers, Logger, Post, Req, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { verifyKey } from "discord-interactions";
 import type { Request } from "express";
 import { DiscordInteractionHandler } from "./discord-interaction.handler";
 import type { DiscordInteractionPayload, DiscordInteractionResponse } from "./discord.types";
 
-/**
- * Discord Interactions Endpoint (POST /api/interactions).
- * Receives slash commands, button clicks, etc. Verifies X-Signature-Ed25519
- * with DISCORD_PUBLIC_KEY, then delegates to DiscordInteractionHandler.
- */
 @Controller("interactions")
 export class DiscordInteractionsController {
   private readonly logger = new Logger(DiscordInteractionsController.name);

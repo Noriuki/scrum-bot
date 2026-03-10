@@ -35,6 +35,7 @@ async function main() {
     console.error("Discord API error:", res.status, data);
     process.exit(1);
   }
+
   console.log("Command registered:", data.name, data.id);
 }
 

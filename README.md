@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/scrumbot-logo.png" alt="ScrumBot" width="120" />
+  <img src="assets/images/scrumbot-logo.png" alt="ScrumBot" width="120" />
 </p>
 
 <h1 align="center">ScrumBot</h1>
@@ -167,14 +167,14 @@ Configurar a URL no Discord: **Interactions Endpoint URL** no painel do app. Ver
 
 ### Fluxo das sessões
 
-1. **Uma sessão ativa por canal** — `/planning-poker start [título] [escala]`  
+1. **Uma sessão ativa por canal** — `/planning-poker start [título] [escala]`
    Escala opcional: **points** (1–5, padrão) ou **fibonacci**.
 
-2. **Várias stories na mesma sessão** — `/planning-poker story título:<texto>`  
-   Cada story gera uma mensagem com botões de voto.  
+2. **Várias stories na mesma sessão** — `/planning-poker story título:<texto>`
+   Cada story gera uma mensagem com botões de voto.
    `/planning-poker reveal` revela os votos da **última** story (média + lista).
 
-3. **Encerrar** — `/planning-poker end`  
+3. **Encerrar** — `/planning-poker end`
    Envia **relatório** (todas as stories + média). Depois não é possível adicionar story nem revelar; use `start` para nova sessão no canal.
 
 ### Uso programático

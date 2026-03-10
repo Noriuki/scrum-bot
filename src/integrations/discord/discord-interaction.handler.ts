@@ -1,16 +1,20 @@
 import { Injectable, Logger } from "@nestjs/common";
-import type { PlanningPokerScaleId } from "../../common/constants";
-import {
-  getPlanningPokerValues,
-  PLANNING_POKER_SCALES,
-  SESSION_STATUS,
-} from "../../common/constants";
+import type { PlanningPokerScaleSlug } from "../../common/constants";
+import { getPlanningPokerValues, PLANNING_POKER_SCALES, SESSION_STATUS } from "../../common/constants";
 import { isUuid } from "../../common/utils";
 import { SessionService } from "../../modules/session/session.service";
 import { StoryService } from "../../modules/story/story.service";
 import { UserService } from "../../modules/user/user.service";
 import { VoteService } from "../../modules/vote/vote.service";
-import { DISCORD_BUTTON_STYLE, DISCORD_CUSTOM_ID } from "./discord.constants";
+import {
+  DISCORD_BUTTON_STYLE,
+  DISCORD_COMPONENT_TYPE,
+  DISCORD_CUSTOM_ID,
+  DISCORD_INTERACTION_RESPONSE_TYPE,
+  DISCORD_INTERACTION_TYPE,
+  PLANNING_POKER_COMMAND_NAME,
+  PLANNING_POKER_SUBCOMMANDS,
+} from "./discord.constants";
 import type {
   DiscordApplicationCommandData,
   DiscordComponent,
@@ -18,45 +22,34 @@ import type {
   DiscordInteractionResponse,
   DiscordMessageComponentData,
 } from "./discord.types";
-import {
-  DiscordComponentType,
-  DiscordInteractionResponseType,
-  DiscordInteractionType,
-} from "./discord.types";
-
-const COMMAND_NAME = "planning-poker";
-const SUBCOMMAND_START = "start";
-const SUBCOMMAND_STORY = "story";
-const SUBCOMMAND_REVEAL = "reveal";
-const SUBCOMMAND_END = "end";
 
 @Injectable()
 export class DiscordInteractionHandler {
   private readonly logger = new Logger(DiscordInteractionHandler.name);
 
   constructor(
-    private readonly userService: UserService,
-    private readonly sessionService: SessionService,
-    private readonly storyService: StoryService,
     private readonly voteService: VoteService,
+    private readonly userService: UserService,
+    private readonly storyService: StoryService,
+    private readonly sessionService: SessionService,
   ) {}
 
   async handle(payload: DiscordInteractionPayload): Promise<DiscordInteractionResponse> {
-    if (payload.type === DiscordInteractionType.PING) {
+    if (payload.type === DISCORD_INTERACTION_TYPE.PING) {
       return { type: 1 };
     }
 
-    if (payload.type === DiscordInteractionType.APPLICATION_COMMAND) {
+    if (payload.type === DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND) {
       return this.handleApplicationCommand(payload, payload.data as DiscordApplicationCommandData);
     }
 
-    if (payload.type === DiscordInteractionType.MESSAGE_COMPONENT) {
+    if (payload.type === DISCORD_INTERACTION_TYPE.MESSAGE_COMPONENT) {
       return this.handleMessageComponent(payload, payload.data as DiscordMessageComponentData);
     }
 
     if (
-      payload.type === DiscordInteractionType.APPLICATION_COMMAND_AUTOCOMPLETE ||
-      payload.type === DiscordInteractionType.MODAL_SUBMIT
+      payload.type === DISCORD_INTERACTION_TYPE.APPLICATION_COMMAND_AUTOCOMPLETE ||
+      payload.type === DISCORD_INTERACTION_TYPE.MODAL_SUBMIT
     ) {
       return this.reply("Este tipo de interação ainda não é suportado.");
     }
@@ -77,10 +70,7 @@ export class DiscordInteractionHandler {
     data: DiscordApplicationCommandData,
   ): Promise<DiscordInteractionResponse> {
     const discordUser = this.getDiscordUser(payload);
-    const appUser = await this.userService.findOrCreateFromDiscord(
-      discordUser.id,
-      discordUser.name,
-    );
+    const appUser = await this.userService.findOrCreateFromDiscord(discordUser.id, discordUser.name);
 
     const channelId = payload.channel_id ?? "";
     const guildId = payload.guild_id ?? "";
@@ -89,7 +79,7 @@ export class DiscordInteractionHandler {
       return this.reply("Este comando precisa ser usado em um canal de servidor (não em DM).");
     }
 
-    if (data.name !== COMMAND_NAME) {
+    if (data.name !== PLANNING_POKER_COMMAND_NAME) {
       return this.reply(
         `Comando \`/${data.name}\` não reconhecido. Use \`/planning-poker start\`, \`story\` ou \`reveal\`.`,
       );
@@ -101,7 +91,7 @@ export class DiscordInteractionHandler {
 
     if (!subName) {
       return this.reply(
-        "Escolha um subcomando: `start` (criar/reabrir sessão), `story` (adicionar story), `reveal` (revelar votos) ou `end` (encerrar sessão).",
+        "🚀 Escolha um subcomando: `start` (criar sessão), `story` (adicionar story), `reveal` (revelar votos) ou `end` (encerrar sessão).",
       );
     }
 
@@ -110,15 +100,15 @@ export class DiscordInteractionHandler {
       return opt?.value;
     };
 
-    if (subName === SUBCOMMAND_START) {
+    if (subName === PLANNING_POKER_SUBCOMMANDS.START) {
       const title = (getOpt("title") as string) ?? "Sessão de Planning Poker";
       const scaleOpt = (getOpt("scale") as string)?.toLowerCase();
       const voteScale =
-        scaleOpt && (scaleOpt === "points" || scaleOpt === "fibonacci") ? scaleOpt : "points";
+        scaleOpt === "points" || scaleOpt === "fibonacci" || scaleOpt === "tshirt" ? scaleOpt : "points";
       const existing = await this.sessionService.findByDiscordChannelId(channelId);
       if (existing?.status === SESSION_STATUS.OPEN) {
         return this.reply(
-          `Já existe uma sessão ativa neste canal: **${existing.title}**. Use \`/planning-poker story <título>\` para adicionar histórias, \`/planning-poker reveal\` para revelar votos ou \`/planning-poker end\` para encerrar.`,
+          `⚠️ Já existe uma sessão ativa neste canal: **${existing.title}**. Use \`/planning-poker story <título>\` para adicionar histórias, \`/planning-poker reveal\` para revelar votos ou \`/planning-poker end\` para encerrar.`,
         );
       }
       const session = await this.sessionService.create({
@@ -129,13 +119,17 @@ export class DiscordInteractionHandler {
         voteScale,
       });
       const scaleLabel =
-        voteScale === "fibonacci" ? "Fibonacci (1, 2, 3, 5, 8, 13, 21)" : "Points (1-5)";
+        voteScale === "fibonacci"
+          ? "Fibonacci (1, 2, 3, 5, 8, 13, 21)"
+          : voteScale === "tshirt"
+            ? "T-Shirt (XS, S, M, L, XL)"
+            : "Points (1-5)";
       return this.reply(
-        `Sessão **${session.title}** criada (votação: ${scaleLabel}). Use \`/planning-poker story <título>\` para adicionar uma user story e iniciar a votação.`,
+        `✅ Sessão **${session.title}** criada (votação: ${scaleLabel}). Use \`/planning-poker story <título>\` para adicionar uma user story e iniciar a votação.`,
       );
     }
 
-    if (subName === SUBCOMMAND_STORY) {
+    if (subName === PLANNING_POKER_SUBCOMMANDS.STORY) {
       const title = getOpt("title") as string | undefined;
       if (!title?.trim()) {
         return this.reply("Informe o título da story: `/planning-poker story título:<texto>`");
@@ -143,9 +137,7 @@ export class DiscordInteractionHandler {
       const description = getOpt("description") as string | undefined;
       const session = await this.sessionService.findOpenByDiscordChannelId(channelId);
       if (!session) {
-        return this.reply(
-          "Nenhuma sessão ativa neste canal. Crie uma com `/planning-poker start [título]`.",
-        );
+        return this.reply("Nenhuma sessão ativa neste canal. Crie uma com `/planning-poker start [título]`.");
       }
       const story = await this.storyService.create({
         title: title.trim(),
@@ -153,24 +145,22 @@ export class DiscordInteractionHandler {
         sessionId: session.id,
       });
       const scaleId = (
-        session.voteScale === "fibonacci" ? "fibonacci" : "points"
-      ) as PlanningPokerScaleId;
+        session.voteScale === "fibonacci" ? "fibonacci" : session.voteScale === "tshirt" ? "tshirt" : "points"
+      ) as PlanningPokerScaleSlug;
       const components = this.buildVoteButtons(story.id, scaleId, false);
       return {
-        type: DiscordInteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        type: DISCORD_INTERACTION_RESPONSE_TYPE.CHANNEL_MESSAGE_WITH_SOURCE,
         data: {
-          content: `**Story:** ${story.title}${story.description ? `\n${story.description}` : ""}\n\nVote nos botões abaixo:`,
+          content: `📌 **Story:** ${story.title}${story.description ? `\n${story.description}` : ""}\n\n🗳️ Vote nos botões abaixo:`,
           components,
         },
       };
     }
 
-    if (subName === SUBCOMMAND_REVEAL) {
+    if (subName === PLANNING_POKER_SUBCOMMANDS.REVEAL) {
       const session = await this.sessionService.findByDiscordChannelId(channelId);
       if (!session) {
-        return this.reply(
-          "Nenhuma sessão neste canal. Crie uma com `/planning-poker start [título]`.",
-        );
+        return this.reply("Nenhuma sessão neste canal. Crie uma com `/planning-poker start [título]`.");
       }
       if (session.status === SESSION_STATUS.CLOSED) {
         return this.reply("Sessão encerrada. Não é possível revelar votos.");
@@ -182,29 +172,29 @@ export class DiscordInteractionHandler {
         );
       }
       const alreadyRevealed = await this.voteService.getRevealedVotes(latestStory.id);
+      const scaleIdReveal =
+        session.voteScale === "fibonacci" ? "fibonacci" : session.voteScale === "tshirt" ? "tshirt" : "points";
       if (alreadyRevealed.length > 0) {
-        const summary = this.formatRevealSummary(latestStory.title, alreadyRevealed, true);
+        const summary = this.formatRevealSummary(latestStory.title, alreadyRevealed, true, scaleIdReveal);
         return this.reply(summary);
       }
       await this.voteService.setRevealedForStory(latestStory.id);
       const votes = await this.voteService.getRevealedVotes(latestStory.id);
-      const summary = this.formatRevealSummary(latestStory.title, votes, false);
+      const summary = this.formatRevealSummary(latestStory.title, votes, false, scaleIdReveal);
       return this.reply(summary);
     }
 
-    if (subName === SUBCOMMAND_END) {
+    if (subName === PLANNING_POKER_SUBCOMMANDS.END) {
       const session = await this.sessionService.findByDiscordChannelId(channelId);
       if (!session) {
-        return this.reply(
-          "Nenhuma sessão neste canal. Crie uma com `/planning-poker start [título]`.",
-        );
+        return this.reply("Nenhuma sessão neste canal. Crie uma com `/planning-poker start [título]`.");
       }
       if (session.status === SESSION_STATUS.CLOSED) {
         return this.reply(
           `A sessão **${session.title}** já está encerrada. Use \`/planning-poker start\` para iniciar uma nova.`,
         );
       }
-      const report = await this.buildSessionReport(session.id, session.title);
+      const report = await this.buildSessionReport(session.id, session.title, session.voteScale);
       await this.sessionService.update(session.id, { status: SESSION_STATUS.CLOSED });
       return this.reply(report);
     }
@@ -219,10 +209,7 @@ export class DiscordInteractionHandler {
     data: DiscordMessageComponentData,
   ): Promise<DiscordInteractionResponse> {
     const discordUser = this.getDiscordUser(payload);
-    const appUser = await this.userService.findOrCreateFromDiscord(
-      discordUser.id,
-      discordUser.name,
-    );
+    const appUser = await this.userService.findOrCreateFromDiscord(discordUser.id, discordUser.name);
 
     const customId = data.custom_id ?? "";
 
@@ -242,22 +229,26 @@ export class DiscordInteractionHandler {
         return this.reply("Story não encontrada. Use os botões da mensagem da story neste canal.");
       }
       if (story.session?.discordChannelId !== channelId) {
-        return this.reply(
-          "Esta votação não é deste canal. Use a mensagem da story no canal correto.",
-        );
+        return this.reply("Esta votação não é deste canal. Use a mensagem da story no canal correto.");
       }
-      const scaleId = story.session?.voteScale === "fibonacci" ? "fibonacci" : "points";
-      const scaleValues = PLANNING_POKER_SCALES[scaleId].values as number[];
-      const allowedValues = [-1, ...scaleValues];
+      const scaleId =
+        story.session?.voteScale === "fibonacci"
+          ? "fibonacci"
+          : story.session?.voteScale === "tshirt"
+            ? "tshirt"
+            : "points";
+      const scaleValues = PLANNING_POKER_SCALES[scaleId].values;
+      const allowedValues =
+        scaleId === "tshirt" ? [-1, ...(scaleValues as string[]).map((_, i) => i)] : [-1, ...(scaleValues as number[])];
       const value = valueStr === "?" ? -1 : parseInt(valueStr, 10);
       if (Number.isNaN(value) || !allowedValues.includes(value)) {
         return this.reply("Valor de voto inválido. Use os botões da mensagem.");
       }
       await this.voteService.upsertVote(storyId, appUser.id, value);
       return {
-        type: DiscordInteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        type: DISCORD_INTERACTION_RESPONSE_TYPE.CHANNEL_MESSAGE_WITH_SOURCE,
         data: {
-          content: "Seu voto foi registrado.",
+          content: "✅ Seu voto foi registrado.",
           flags: 64,
         },
       };
@@ -273,26 +264,30 @@ export class DiscordInteractionHandler {
         return this.reply("Story não encontrada. Use o comando neste canal da sessão.");
       }
       if (story.session?.discordChannelId !== channelId) {
-        return this.reply(
-          "Esta story não é deste canal. Use `/planning-poker reveal` no canal da sessão.",
-        );
+        return this.reply("Esta story não é deste canal. Use `/planning-poker reveal` no canal da sessão.");
       }
       if (story.session?.status === SESSION_STATUS.CLOSED) {
         return this.reply("Sessão encerrada. Não é possível revelar votos.");
       }
+      const scaleIdReveal =
+        story.session?.voteScale === "fibonacci"
+          ? "fibonacci"
+          : story.session?.voteScale === "tshirt"
+            ? "tshirt"
+            : "points";
       const alreadyRevealed = await this.voteService.getRevealedVotes(storyId);
       if (alreadyRevealed.length > 0) {
-        const summary = this.formatRevealSummary(story.title, alreadyRevealed, true);
+        const summary = this.formatRevealSummary(story.title, alreadyRevealed, true, scaleIdReveal);
         return {
-          type: DiscordInteractionResponseType.UPDATE_MESSAGE,
+          type: DISCORD_INTERACTION_RESPONSE_TYPE.UPDATE_MESSAGE,
           data: { content: summary },
         };
       }
       await this.voteService.setRevealedForStory(storyId);
       const votes = await this.voteService.getRevealedVotes(storyId);
-      const summary = this.formatRevealSummary(story.title, votes, false);
+      const summary = this.formatRevealSummary(story.title, votes, false, scaleIdReveal);
       return {
-        type: DiscordInteractionResponseType.UPDATE_MESSAGE,
+        type: DISCORD_INTERACTION_RESPONSE_TYPE.UPDATE_MESSAGE,
         data: { content: summary },
       };
     }
@@ -302,34 +297,56 @@ export class DiscordInteractionHandler {
 
   private reply(content: string): DiscordInteractionResponse {
     return {
-      type: DiscordInteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+      type: DISCORD_INTERACTION_RESPONSE_TYPE.CHANNEL_MESSAGE_WITH_SOURCE,
       data: { content },
     };
   }
 
-  private async buildSessionReport(sessionId: string, sessionTitle: string): Promise<string> {
+  private async buildSessionReport(sessionId: string, sessionTitle: string, voteScale: string): Promise<string> {
     const stories = await this.storyService.findBySessionId(sessionId);
     const lines: string[] = ["📋 **Relatório da sessão**", `**${sessionTitle}**`, ""];
+    const isTshirt = voteScale === "tshirt";
+    const tshirtLabels = isTshirt ? (PLANNING_POKER_SCALES.tshirt.values as readonly string[]) : null;
     if (stories.length === 0) {
       lines.push("_Nenhuma story nesta sessão._");
     } else {
       for (const story of stories) {
         const votes = await this.voteService.findByStoryId(story.id);
         const values = votes.map((v) => v.value).filter((n) => n >= 0);
-        const avg =
-          values.length > 0
-            ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1).replace(/\.0$/, "")
-            : null;
-        const count = values.length;
-        if (avg != null) {
-          const plural = count !== 1 ? "s" : "";
-          lines.push(`  • **${story.title}** — Média: **${avg}** pontos (${count} voto${plural})`);
-        } else {
+        const totalVotes = votes.length;
+        const questionMarks = votes.filter((v) => v.value === -1).length;
+        if (totalVotes === 0) {
           lines.push(`  • **${story.title}** — Sem votos`);
+        } else if (isTshirt && tshirtLabels) {
+          const labels = values.map((idx) => tshirtLabels[idx]).filter(Boolean);
+          const dist = labels.reduce<Record<string, number>>((acc, l) => {
+            acc[l] = (acc[l] ?? 0) + 1;
+            return acc;
+          }, {});
+          const distStr = Object.entries(dist)
+            .map(([k, n]) => (n > 1 ? `${n}× ${k}` : k))
+            .join(", ");
+          const suffix = questionMarks > 0 ? ` (${questionMarks} ?)` : "";
+          lines.push(`  • **${story.title}** — ${distStr}${suffix}`);
+        } else {
+          const avg =
+            values.length > 0
+              ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1).replace(/\.0$/, "")
+              : null;
+          const numericCount = values.length;
+          if (avg != null) {
+            const plural = numericCount !== 1 ? "s" : "";
+            lines.push(
+              `  • **${story.title}** — Média: **${avg}** pontos (${numericCount} voto${plural}${questionMarks > 0 ? `, ${questionMarks} ?` : ""})`,
+            );
+          } else {
+            const plural = totalVotes !== 1 ? "s" : "";
+            lines.push(`  • **${story.title}** — ${totalVotes} voto${plural} (?)`);
+          }
         }
       }
     }
-    lines.push("", "_Sessão encerrada._");
+    lines.push("", "🏁 _Sessão encerrada._");
     return lines.join("\n");
   }
 
@@ -337,16 +354,19 @@ export class DiscordInteractionHandler {
     storyTitle: string,
     votes: { value: number; user?: { name: string | null } | null }[],
     alreadyRevealed = false,
+    scaleSlug: PlanningPokerScaleSlug = "points",
   ): string {
     if (votes.length === 0) {
       return `📋 **${storyTitle}**\n\n_Nenhum voto registrado._`;
     }
-    const lines = votes.map(
-      (v) => `  • **${v.user?.name ?? "?"}** → ${v.value === -1 ? "?" : v.value}`,
-    );
+    const isTshirt = scaleSlug === "tshirt";
+    const tshirtLabels = isTshirt ? (PLANNING_POKER_SCALES.tshirt.values as readonly string[]) : null;
+    const formatValue = (v: number): string =>
+      v === -1 ? "?" : isTshirt && tshirtLabels ? (tshirtLabels[v] ?? "?") : String(v);
+    const lines = votes.map((v) => `  • **${v.user?.name ?? "?"}** → ${formatValue(v.value)}`);
     const values = votes.map((v) => v.value).filter((n) => n >= 0);
     const avg =
-      values.length > 0
+      !isTshirt && values.length > 0
         ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(1).replace(/\.0$/, "")
         : null;
     const header = alreadyRevealed ? "**Votos já revelados**" : "**Votos revelados**";
@@ -359,18 +379,19 @@ export class DiscordInteractionHandler {
 
   private buildVoteButtons(
     storyId: string,
-    scaleId: PlanningPokerScaleId = "points",
+    scaleSlug: PlanningPokerScaleSlug = "points",
     includeRevealButton = false,
   ): DiscordComponent[] {
-    const values = getPlanningPokerValues(scaleId) as readonly number[];
-    const voteButtons: DiscordComponent[] = values.map((val) => ({
-      type: DiscordComponentType.BUTTON,
+    const values = getPlanningPokerValues(scaleSlug);
+    const isTshirtSize = scaleSlug === "tshirt";
+    const voteButtons: DiscordComponent[] = (values as readonly (number | string)[]).map((val, index) => ({
+      type: DISCORD_COMPONENT_TYPE.BUTTON,
       style: DISCORD_BUTTON_STYLE.PRIMARY,
       label: String(val),
-      custom_id: `vote:${storyId}:${val}`,
+      custom_id: `vote:${storyId}:${isTshirtSize ? index : val}`,
     }));
     voteButtons.push({
-      type: DiscordComponentType.BUTTON,
+      type: DISCORD_COMPONENT_TYPE.BUTTON,
       style: DISCORD_BUTTON_STYLE.SECONDARY,
       label: "?",
       custom_id: `vote:${storyId}:?`,
@@ -378,26 +399,26 @@ export class DiscordInteractionHandler {
     const rows: DiscordComponent[] = [];
     for (let i = 0; i < voteButtons.length; i += 5) {
       const row = voteButtons.slice(i, i + 5);
-      if (row.length) rows.push({ type: DiscordComponentType.ACTION_ROW, components: row });
+      if (row.length) rows.push({ type: DISCORD_COMPONENT_TYPE.ACTION_ROW, components: row });
     }
     if (includeRevealButton && rows.length > 0) {
       const lastRow = rows[rows.length - 1];
       const current = (lastRow as { components: DiscordComponent[] }).components;
       if (current.length < 5) {
         current.push({
-          type: DiscordComponentType.BUTTON,
+          type: DISCORD_COMPONENT_TYPE.BUTTON,
           style: DISCORD_BUTTON_STYLE.SUCCESS,
-          label: "Revelar votos",
+          label: "🔓 Revelar votos",
           custom_id: `reveal:${storyId}`,
         });
       } else {
         rows.push({
-          type: DiscordComponentType.ACTION_ROW,
+          type: DISCORD_COMPONENT_TYPE.ACTION_ROW,
           components: [
             {
-              type: DiscordComponentType.BUTTON,
+              type: DISCORD_COMPONENT_TYPE.BUTTON,
               style: DISCORD_BUTTON_STYLE.SUCCESS,
-              label: "Revelar votos",
+              label: "🔓 Revelar votos",
               custom_id: `reveal:${storyId}`,
             },
           ],
