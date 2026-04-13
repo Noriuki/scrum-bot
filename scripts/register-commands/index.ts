@@ -36,7 +36,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("Command registered:", data.name, data.id);
+  process.stdout.write(`Command registered: ${String(data.name)} ${String(data.id)}\n`);
 }
 
 void main();
